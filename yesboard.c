@@ -53,6 +53,8 @@
 #define COLOR_LABEL    0xffffff
 #define SIZE 30
 #define SCALE 2
+#define SEP 5
+#define RESET_KEYCODE 22
 
 struct key {
     unsigned int keycode;
@@ -60,9 +62,10 @@ struct key {
     int nameLen;
     int x;
     int y;
-    int fx;
-    int fy;
+    int fw;
+    int fh;
     int pressed;
+    int count;
 };
 
 struct {
@@ -70,15 +73,15 @@ struct {
     int screen;
     Window win;
     GC gc;
-    XFontStruct *font;
+    XFontStruct *keyfont, *numfont;
     struct key *keys;
 } app;
 
 struct key mkKey(int keycode, char *name, int x, int y) {
     int _, asc, desc;
     XCharStruct overall;
-    XTextExtents(app.font, name, strlen(name), &_, &asc, &desc, &overall);
-    return (struct key){ keycode, name, strlen(name), x, y, -overall.width, asc - desc,  0 };
+    XTextExtents(app.keyfont, name, strlen(name), &_, &asc, &desc, &overall);
+    return (struct key){ keycode, name, strlen(name), x, y, overall.width, asc - desc, 0, 0 };
 }
 
 int key_press_type = -1;
@@ -120,14 +123,27 @@ found:
     return 1;
 }
 
+#define NUMBUF 10
+char numbuf[NUMBUF];
+
 void redraw(struct key key) {
     int x = SIZE*key.x/SCALE, y = SIZE*key.y/SCALE;
 
     XSetForeground(app.dpy, app.gc, key.pressed ? COLOR_PRESSED : COLOR_RELEASED);
     XFillRectangle(app.dpy, app.win, app.gc, x, y, SIZE, SIZE);
 
+    snprintf(numbuf, NUMBUF, "%d", key.count);
+    int _, asc, desc;
+    XCharStruct overall;
+    XTextExtents(app.numfont, numbuf, strlen(numbuf), &_, &asc, &desc, &overall);
+    const int h = SEP + asc - desc;
+
     XSetForeground(app.dpy, app.gc, COLOR_LABEL);
-    XDrawString(app.dpy, app.win, app.gc, x + (SIZE + key.fx)/2, y + (SIZE + key.fy)/2, key.name, key.nameLen);
+    XSetFont(app.dpy, app.gc, app.keyfont->fid);
+    XDrawString(app.dpy, app.win, app.gc, x + (SIZE - key.fw)/2, y + (SIZE + key.fh - h)/2, key.name, key.nameLen);
+
+    XSetFont(app.dpy, app.gc, app.numfont->fid);
+    XDrawString(app.dpy, app.win, app.gc, x + (SIZE - overall.width)/2, y + (SIZE + key.fh + h)/2, numbuf, strlen(numbuf));
 }
 
 void go() {
@@ -163,9 +179,19 @@ void go() {
             }
         } else if ((ev.type == key_press_type) || (ev.type == key_release_type)) {
             XDeviceKeyEvent *kev = (XDeviceKeyEvent *) &ev;
-            for (struct key *key = app.keys; key->keycode; ++key) {
+            if (kev->keycode == RESET_KEYCODE) {
+                for (struct key *key = app.keys; key->keycode; ++key) {
+                    key->count = 0;
+                    redraw(*key);
+                }
+            } else for (struct key *key = app.keys; key->keycode; ++key) {
                 if (key->keycode == kev->keycode) {
-                    key->pressed = ev.type == key_press_type ? 1 : 0;
+                    if (ev.type == key_press_type) {
+                        if (!key->pressed) ++key->count;
+                        key->pressed = 1;
+                    } else {
+                        key->pressed = 0;
+                    }
                     redraw(*key);
                 }
             }
@@ -205,7 +231,8 @@ int main(int argc, char* argv[]) {
         goto out;
     }
 
-    app.font = XLoadQueryFont(app.dpy, "fixed");
+    app.keyfont = XLoadQueryFont(app.dpy, "fixed");
+    app.numfont = XLoadQueryFont(app.dpy, "-*-fixed-medium-*-*-*-9-*-*-*-*-*-*-*");
 
     struct key keys[12] = {
         mkKey(25, "W", 2, 0),
