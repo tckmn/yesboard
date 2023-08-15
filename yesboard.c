@@ -55,6 +55,7 @@
 #define SCALE 2
 #define SEP 5
 #define RESET_KEYCODE 22
+#define MAX_NAME 50
 
 struct key {
     unsigned int keycode;
@@ -202,8 +203,8 @@ void go() {
 int main(int argc, char* argv[]) {
     app.dpy = NULL;
 
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s [id]\n", argv[0]);
+    if (argc != 3) {
+        fprintf(stderr, "usage: %s [id] [conf]\n", argv[0]);
         goto out;
     }
 
@@ -234,26 +235,44 @@ int main(int argc, char* argv[]) {
     app.keyfont = XLoadQueryFont(app.dpy, "fixed");
     app.numfont = XLoadQueryFont(app.dpy, "-*-fixed-medium-*-*-*-9-*-*-*-*-*-*-*");
 
-    struct key keys[12] = {
-        mkKey(25, "W", 2, 0),
-        mkKey(26, "E", 4, 0),
+    FILE *fp = fopen(argv[2], "r");
+    if (!fp) {
+        fprintf(stderr, "failed to open conf file\n");
+        goto out;
+    }
 
-        mkKey(38, "A", 0, 2),
-        mkKey(39, "S", 2, 2),
-        mkKey(40, "D", 4, 2),
-        mkKey(41, "F", 6, 2),
+    int nkeys = 10, curkey = 0;
+    struct key *keys = malloc(nkeys * sizeof *keys);
 
-        mkKey(31, "I", 11, 0),
-        mkKey(44, "J", 9, 2),
-        mkKey(45, "K", 11, 2),
-        mkKey(46, "L", 13, 2),
+    int keycode, x, y, last;
+    char namebuf[MAX_NAME+1], *name;
+    for (;;) {
+        int ret = fscanf(fp, "%d %d %d ", &keycode, &x, &y);
 
-        mkKey(65, "spc", 6, 4),
+        if (ret == EOF) {
+            keys[curkey] = mkKey(0, "", 0, 0);
+            break;
+        }
 
-        mkKey(0, "", 0, 0)
-    };
+        if (ret != 3 || !fgets(namebuf, MAX_NAME, fp) || namebuf[last = strlen(namebuf)-1] != '\n') {
+            fprintf(stderr, "invalid conf file\n");
+            goto out;
+        }
+
+        // intentionally alloc 1 less to strip newline
+        name = malloc((last + 1) * sizeof *name);
+        strncpy(name, namebuf, last);
+        name[strlen(namebuf) - 1] = 0;
+
+        // printf("adding key [%s] code %d at %d %d\n", name, keycode, x, y);
+        keys[curkey++] = mkKey(keycode, name, x, y);
+        if (curkey >= nkeys) {
+            nkeys *= 2;
+            keys = realloc(keys, nkeys * sizeof *keys);
+        }
+    }
+
     app.keys = keys;
-
     go();
 
 out:
